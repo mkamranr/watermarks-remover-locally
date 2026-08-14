@@ -208,7 +208,22 @@ def test_json_reports_applied_knobs(scene):
 # --- dtype ----------------------------------------------------------------
 
 
+def _has_torch() -> bool:
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def test_dtype_flag_is_passed_to_the_engine(scene):
+    """--dtype must reach the engine as a real torch dtype when torch exists.
+
+    Without torch the adapter passes None on purpose, handing the choice back
+    to the backend, so both environments are asserted explicitly. Asserting
+    only the torch case made this test depend on whatever happened to be
+    installed, which is exactly what the rest of this suite avoids.
+    """
     upstream, src, tmp = scene
     sink = tmp / "sink.json"
     r = _run(
@@ -216,7 +231,23 @@ def test_dtype_flag_is_passed_to_the_engine(scene):
         "--device", "cuda", "--dtype", "fp32", "--json", sink=sink,
     )
     assert r.returncode == 0, r.stderr
-    assert "float32" in json.loads(sink.read_text())["dtype"]
+    dtype = json.loads(sink.read_text())["dtype"]
+    if _has_torch():
+        assert "float32" in dtype
+    else:
+        assert dtype == "None", dtype
+
+
+def test_dtype_name_is_reported_regardless_of_torch(scene):
+    """The JSON dtype *name* is resolved by local_models, not torch, so it is
+    reported identically on a machine with no GPU stack."""
+    upstream, src, tmp = scene
+    r = _run(
+        str(src), "-o", str(tmp / "out.png"), "--upstream-dir", str(upstream),
+        "--device", "cuda", "--dtype", "bf16", "--json",
+    )
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["dtype"] == "bf16"
 
 
 def test_dtype_auto_reports_the_resolved_choice(scene):
