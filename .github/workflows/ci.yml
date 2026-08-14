@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: the suite only reads the checkout.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.13']
+
+    steps:
+      # Actions are SHA-pinned rather than tag-pinned: a moving tag is a
+      # supply-chain drift point, matching the posture set in v0.3.2.
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      # The optional tiers (pixel-lite, the z-score detector) need Pillow and
+      # numpy. Their tests importorskip, so the suite still passes without
+      # them -- installing here means those paths are actually exercised.
+      - name: Install optional tier dependencies
+        run: python -m pip install Pillow numpy
+
+      - name: Run tests
+        run: python -m pytest
+
+      # No GPU, no torch, no model weights and no network are required:
+      # every backend test is mock-based.
+      - name: Preflight (doctor)
+        run: python skills/remove-ai-marks/scripts/doctor.py --json
+
+  smoke:
+    name: CLI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.13'
+
+      - name: Install optional tier dependencies
+        run: python -m pip install Pillow numpy
+
+      - name: Smoke
+        run: |
+          make smoke
+          make smoke-lite
+
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.13'
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Audit pinned dev dependencies
+        run: pip-audit -r requirements-dev.txt
